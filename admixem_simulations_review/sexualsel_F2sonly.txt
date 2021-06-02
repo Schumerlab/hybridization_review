@@ -1,0 +1,5 @@
+Population	Gen	Selection
+birchmanni	-1	1
+malinche	-1	1
+hyb	0	if(Trait0 != Courter_Trait0,1,0)
+hyb	-1	1

@@ -1,0 +1,485 @@
+// set up an F4-style introgression with DMIs and/or load
+
+function (float)BDMI_fitness(integer num_a_alleles, integer num_b_alleles, float s_1, float s_2, float h_1, float h_2)
+{
+	if (num_a_alleles == 2)
+		if (num_b_alleles == 0)
+			return 1.0 / (1 + s_1);
+		else if (num_b_alleles == 1)
+			return (1 + h_2 * s_2) / (1 + s_1);
+		else
+			return (1 + s_2) / (1 + s_1);
+	else if (num_a_alleles == 1)
+		if (num_b_alleles == 0)
+			return (1 + (1-h_1)*s_1) / (1 + s_1);
+		else if (num_b_alleles == 1)
+			return ( (1 + h_1*(1-h_2)*s_1) * (1 + (1-h_1)*h_2*s_2) ) / (1 + s_1);
+		else
+			return (1 + h_1*s_2)/ (1 + s_1);
+	else if (num_b_alleles == 2)
+		return 1.0 / (1 + s_1);
+	else if (num_b_alleles == 1)
+		return (1 + (1-h_2)*s_1) / (1 + s_1);
+	else
+		return 1.0;
+}
+
+initialize() {
+	
+	
+	defineConstant("work_dir", "./"); // The working directory.
+	defineConstant("out_dir", "slim_out_DMI");
+	defineConstant("seed", SEED);
+	setSeed(seed);
+	defineConstant("chr_length",31064592);
+	defineConstant("bdm_34v2_n",NUMDMI); // The # of incompatibilities with population 2 that arose in the common ancestor of both p3 and p4 (repeat DMIs)
+	defineConstant("bdm_2v3_n",0); // The # of BDMI between populations 2 and 3 (barriers to introgression)
+	defineConstant("bdm_2v4_n",0); // The # of BMDI between populations 2 and 4 (not shared with p3, potential introgression-derived DMIs)
+	defineConstant("bdm_3v4_n",0); // The # of BDMI between populations 3 and 4 (sister species)
+	defineConstant("s_bdm",SDMI); // Fitness effect of double homozygosity (< 0 for BMDI, must be float)
+	defineConstant("s_anc",SANC); // Fitness of ancestral relative to derived (< 0 for adaptive BDMIs, must be float)
+	defineConstant("ha",0.0); // Dominance coefficient of the first locus involved in a BDMI
+	defineConstant("hb",0.5); // Dominance coefficient of the second locus involved in a BDMI
+	defineConstant("numloadmut",NLOAD); // Number of load loci to add to p2 (group admixing with one sister)
+	defineConstant("sload",SLOAD); // Mean selection coefficient against load loci
+	defineConstant("Ne", NE); // Effective Population Size (same for all populations)
+	
+	
+	//no mutations since the trees will be recorded
+	initializeMutationRate(0);
+	initializeTreeSeq();
+	
+	defineConstant("focal_derived_population_boolean", sample(c(F,T), bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n, replace = T));	
+	
+	//set up genomic elements, but no mutations will occur
+	initializeMutationType("m1", 0.5, "f", 0.0);  // The BDM allele in p3 and p4 that interacts with p2
+	initializeMutationType("m2", 0.5, "f", 0.0);  // The BDM allele in p2 that interacts with p3 and p4
+	initializeMutationType("m3", 0.5, "f", 0.0);  // The BDM allele in p2 that interacts with p3
+	initializeMutationType("m4", 0.5, "f", 0.0);  // The BDM allele in p3 that interacts with p2
+	initializeMutationType("m5", 0.5, "f", 0.0);  // The BDM allele in p2 that interacts with p4
+	initializeMutationType("m6", 0.5, "f", 0.0);  // The BDM allele in p4 that interacts with p2
+	initializeMutationType("m7", 0.5, "f", 0.0);  // The BDM allele in p3 that interacts with p4
+	initializeMutationType("m8", 0.5, "f", 0.0);  // The BDM allele in p4 that interacts with p3
+	initializeMutationType("m9", 0.5, "e", sload); // Load loci with exponentially distributed selection coeff.
+	initializeGenomicElementType("g1", c(m1,m3,m5,m7,m9), rep(1.0,5)); // mutation sites on chr 2
+	initializeGenomicElementType("g2", c(m2,m4,m6,m8), rep(1.0,4)); // interacting mutation sites
+	
+	m1.convertToSubstitution = F;
+	m2.convertToSubstitution = F;
+	m3.convertToSubstitution = F;
+	m4.convertToSubstitution = F;
+	m5.convertToSubstitution = F;
+	m6.convertToSubstitution = F;
+	m7.convertToSubstitution = F;
+	m8.convertToSubstitution = F;
+	m9.convertToSubstitution = F;
+	
+	
+	// colors, for use in SLiMGui
+	m1.color = "red";
+	m2.color = "green";
+	m3.color = "yellow";
+	m4.color = "purple";
+	m5.color = "blue";
+	m6.color = "orange"; // neutral p1
+	m7.color = "turquoise"; // neutral p2
+	m8.color = "coral";
+	m9.color = "white";
+	
+	
+	// placing regions with possible deleterious mutations based on CDS annotations
+	coding = readFile(work_dir+"xiphophorus_birchmanni_10x_12Sep2018_yDAA6-ScyDAA6-1196-HRSCAF-1406_coding_nonoverlapping.tsv");
+	
+	for (line in coding)
+	{
+		components = strsplit(line, "\t");
+		initializeGenomicElement(g1, asInteger(components[1]), asInteger(components[2]));
+	}
+	// placing unlinked bases at the end of the chromosome to act as interacting loci
+	if (bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n > 0) 
+	{
+	   initializeGenomicElement(g2, chr_length, chr_length + bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n - 1);
+	}
+	// creating recombination map for chromosome 2 (ScyDAA6-1196-HRSCAF-1406, randomly chosen	
+	lines = readFile(work_dir+"SLiM-ready-recmap-ScyDAA6-1196-HRSCAF-1406.tsv");
+	rates = c();
+	ends = c();
+	for (line in lines)
+	{
+		components = strsplit(line,"\t");
+		rates = c(rates, asFloat(components[0]));
+		ends = c(ends, asInteger(components[1]));
+	}
+	if (bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n > 0)
+	{
+		ends[length(ends)-1] = chr_length + bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n - 1;
+	}
+	initializeRecombinationRate(rates, ends);
+}
+
+
+// create populations stepwise from each other
+1 late() {
+	sim.addSubpop("p1", Ne);
+
+	// Setting timing of population splits and admixture, as a function of Ne
+	sim.rescheduleScriptBlock(s1, start= asInteger(10 * Ne), end= asInteger(10 * Ne)); // Burnin ends, split between outgroup and rest occurs
+        sim.rescheduleScriptBlock(s2, start= asInteger((10 +  1) * Ne), end= asInteger((10 +  1) * Ne)); // Split between sisters and introgressing clade
+        sim.rescheduleScriptBlock(s3, start= asInteger((10 + 1 + 1) * Ne), end= asInteger((10 + 1 + 1) * Ne)); // Split between sisters
+        sim.rescheduleScriptBlock(s4, start= asInteger((10 + 1 + 1 + 2) * Ne), end= asInteger((10 + 1 + 1 + 2) * Ne)); // Admixed population forms
+        sim.rescheduleScriptBlock(s5, start= asInteger((10 + 1 + 1 + 2) * Ne + 1), end= asInteger((10 + 1 + 1 + 2) * Ne + 1)); // Admixed population becomes isolated
+        sim.rescheduleScriptBlock(s6, start= asInteger((10 + 1 + 1 + 2 + 2) * Ne + 1), end= asInteger((10 + 1 + 1 + 2 + 2) * Ne + 1)); // output
+        sim.rescheduleScriptBlock(s7, start= asInteger((10 + 1 + 1 + 2) * Ne + 1)); // DMI period (should be same as s5, but no end time)
+}
+
+s1 40000 late() {
+	sim.addSubpopSplit("p2", Ne, p1);
+	//sim.treeSeqRememberIndividuals(sim.subpopulations.individuals);
+}
+
+s2 60000 late() {
+	sim.addSubpopSplit("p3", Ne, p2);
+	sim.treeSeqRememberIndividuals(sim.subpopulations.individuals);	
+	
+	//now that p3 is formed, adding DMIs that differentiate p3 from the ancestor of p1 and p2
+	
+	
+	if (bdm_34v2_n > 0)
+	
+	{	// Adding mutations on the focal chromosome
+
+		for (mut in 0:(bdm_34v2_n-1))
+		{
+			gene = sample(0:(length(sim.chromosome.genomicElements.startPosition) - 1), 1, weights = sim.chromosome.genomicElements.endPosition - sim.chromosome.genomicElements.startPosition); // first step: choose the gene where the mutation will be found, weighted by gene length
+			position = sample(sim.chromosome.genomicElements.startPosition[gene]:sim.chromosome.genomicElements.endPosition[gene], 1); // then choose the base
+			if (focal_derived_population_boolean[mut])
+			{
+				p2.genomes.addNewDrawnMutation(m1, position);
+			}
+			else
+			{
+				p3.genomes.addNewDrawnMutation(m1, position);
+			}
+		}
+		p2_mutations = p2.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m1);
+		p34_mutations = p3.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m1);
+		defineConstant("bdm_m1_loci",c(sample(p2_mutations, length(p2_mutations)), sample(p34_mutations, length(p34_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m1),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt");
+
+		// Adding unlinked interacting mutations
+		for (mut in 0:(bdm_34v2_n-1))
+		{
+			if (focal_derived_population_boolean[mut])
+			{
+				p3.genomes.addNewDrawnMutation(m2,chr_length + mut);
+			}
+			else
+			{
+				p2.genomes.addNewDrawnMutation(m2,chr_length + mut);
+			}
+		}
+		
+		p34_mutations = p3.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m2);
+		p2_mutations = p2.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m2);
+		defineConstant("bdm_m2_loci",c(sample(p34_mutations, length(p34_mutations)), sample(p2_mutations, length(p2_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m2),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+	}
+
+	//Add load mutations to p2
+	if (numloadmut > 0)
+	{
+		for (mut in 0:(numloadmut - 1))
+		{
+			gene = sample(0:(length(sim.chromosome.genomicElements.startPosition) - 1), 1, weights = sim.chromosome.genomicElements.endPosition - sim.chromosome.genomicElements.startPosition); // first step: choose the gene where the mutation will be found, weighted by gene length
+			position = sample(sim.chromosome.genomicElements.startPosition[gene]:sim.chromosome.genomicElements.endPosition[gene], 1); // then choose the base
+			p2.genomes.addNewDrawnMutation(m9, position);
+		}
+		
+		sim.outputMutations(sim.mutationsOfType(m9),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+	
+	}
+}
+
+
+s3 70000 late() {
+	sim.addSubpopSplit("p4", Ne, p3);
+	sim.treeSeqRememberIndividuals(sim.subpopulations.individuals);
+
+	//now that p4 is formed, adding DMIs that differentiate p4 from p2 and p3, as well as DMIs with p2 that are private to p3
+	
+	// First, incompatibilities with p2 that are private to p3
+	
+	if (bdm_2v3_n > 0)
+	{
+		// Adding mutations on the focal chromosome
+		for (mut in 0:(bdm_2v3_n-1))
+		{
+			gene = sample(0:(length(sim.chromosome.genomicElements.startPosition) - 1), 1, weights = sim.chromosome.genomicElements.endPosition - sim.chromosome.genomicElements.startPosition); // first step: choose the gene where the mutation will be found, weighted by gene length
+			position = sample(sim.chromosome.genomicElements.startPosition[gene]:sim.chromosome.genomicElements.endPosition[gene], 1); // then choose the base
+			if (focal_derived_population_boolean[bdm_34v2_n + mut])
+			{
+				p2.genomes.addNewDrawnMutation(m3, position);
+			}
+			else
+			{
+				p3.genomes.addNewDrawnMutation(m3, position);
+			}
+		}
+		
+		p2_mutations = p2.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m3);
+		p3_mutations = p3.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m3);
+		defineConstant("bdm_m3_loci",c(sample(p2_mutations, length(p2_mutations)), sample(p3_mutations, length(p3_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m3),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+
+		
+		// Adding unlinked interacting mutations
+		for (mut in bdm_34v2_n:(bdm_34v2_n + bdm_2v3_n - 1))
+		{
+			if (focal_derived_population_boolean[mut])
+			{
+				p3.genomes.addNewDrawnMutation(m4,chr_length + mut);
+			}
+			else
+			{
+				p2.genomes.addNewDrawnMutation(m4,chr_length + mut);
+			}
+		}
+		
+		p3_mutations = p3.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m4);
+		p2_mutations = p2.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m4);
+		defineConstant("bdm_m4_loci",c(sample(p3_mutations, length(p3_mutations)), sample(p2_mutations, length(p2_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m4),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+
+	}
+	
+	// Next, incompatibilities between p2 and p4
+	if (bdm_2v4_n > 0)
+	{
+		// Adding mutations on the focal chromosome
+		for (mut in 0:(bdm_2v4_n-1))
+		{
+			gene = sample(0:(length(sim.chromosome.genomicElements.startPosition) - 1), 1, weights = sim.chromosome.genomicElements.endPosition - sim.chromosome.genomicElements.startPosition); // first step: choose the gene where the mutation will be found, weighted by gene length
+			position = sample(sim.chromosome.genomicElements.startPosition[gene]:sim.chromosome.genomicElements.endPosition[gene], 1); // then choose the base
+
+			if (focal_derived_population_boolean[bdm_34v2_n + bdm_2v3_n + mut])
+			{
+				p2.genomes.addNewDrawnMutation(m5, position);
+			}
+			else
+			{
+				p4.genomes.addNewDrawnMutation(m5, position);
+			}
+		}
+		
+		p2_mutations = p2.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m5);
+		p4_mutations = p4.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m5);
+		defineConstant("bdm_m5_loci",c(sample(p2_mutations, length(p2_mutations)), sample(p4_mutations, length(p4_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m5),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+
+		// Adding unlinked interacting mutations
+		for (mut in (bdm_34v2_n + bdm_2v3_n):(bdm_34v2_n + bdm_2v3_n + bdm_2v4_n-1))
+		{
+			if (focal_derived_population_boolean[mut])
+			{
+				p4.genomes.addNewDrawnMutation(m6,chr_length + mut);
+			}
+			else
+			{
+				p2.genomes.addNewDrawnMutation(m6,chr_length + mut);
+			}
+		}
+		
+		p4_mutations = p4.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m6);
+		p2_mutations = p2.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m6);
+		defineConstant("bdm_m6_loci",c(sample(p4_mutations, length(p4_mutations)), sample(p2_mutations, length(p2_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m6),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+
+	}
+	
+	// Finally, incompatibilities between p3 and p4
+	if (bdm_3v4_n > 0)
+	{
+		// Adding mutations on the focal chromosome
+		for (mut in 0:(bdm_3v4_n-1))
+		{
+			gene = sample(0:(length(sim.chromosome.genomicElements.startPosition) - 1), 1, weights = sim.chromosome.genomicElements.endPosition - sim.chromosome.genomicElements.startPosition); // first step: choose the gene where the mutation will be found, weighted by gene length
+			position = sample(sim.chromosome.genomicElements.startPosition[gene]:sim.chromosome.genomicElements.endPosition[gene], 1); // then choose the base
+			
+			if (focal_derived_population_boolean[bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + mut])
+			{
+				p3.genomes.addNewDrawnMutation(m7, position);
+			}
+			else
+			{
+				p4.genomes.addNewDrawnMutation(m7, position);
+			}
+		}
+		
+		p3_mutations = p3.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m7);
+		p4_mutations = p4.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m7);
+		defineConstant("bdm_m7_loci",c(sample(p3_mutations, length(p3_mutations)), sample(p4_mutations, length(p4_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m7),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+	
+		// Adding unlinked interacting mutations
+		for (mut in (bdm_34v2_n + bdm_2v3_n + bdm_2v4_n):(bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n - 1))
+		{
+			if (focal_derived_population_boolean[mut])
+			{
+				p4.genomes.addNewDrawnMutation(m8,chr_length + mut);
+			}
+			else
+			{
+				p3.genomes.addNewDrawnMutation(m8,chr_length + mut);
+			}
+		}
+		
+		p4_mutations = p4.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m8);
+		p3_mutations = p3.sampleIndividuals(1).genome1.positionsOfMutationsOfType(m8);
+		defineConstant("bdm_m8_loci",c(sample(p4_mutations, length(p4_mutations)), sample(p3_mutations, length(p3_mutations))));
+		sim.outputMutations(sim.mutationsOfType(m8),filePath=work_dir+"/"+out_dir+"/mutation_locations_dmi_" + seed + ".txt",append=T);
+
+	}
+}
+s4 75000 late() {
+	sim.addSubpop("p5", Ne);
+	p5.setMigrationRates(c(p2,p3), c(INIT_PROP,1-INIT_PROP)); // Creating a hybrid population
+	//p2 is admixing lineage, p3 is the recipient lineage
+}
+
+s5 75001 late() {
+	p5.setMigrationRates(p2, c(0.0));
+	p5.setMigrationRates(p3, c(0.0));
+	//p1.setSubpopulationSize(0);
+	//p2.setSubpopulationSize(0);
+	//p3.setSubpopulationSize(0);
+	//p4.setSubpopulationSize(0);
+
+}
+
+s6 76001 late() { // The generation 2000 here is replaced by whatever value is entered into "rescheduleScriptBlock" above
+	//outdir=paste0(c("./slim_out_DMI/F4_test_sim_dmi_",FILE,".trees"));
+	sim.treeSeqOutput(work_dir+"/"+out_dir+"/F4_test_sim" + seed + ".trees");
+	sim.outputMutations(sim.mutationsOfType(m1),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt");
+	sim.outputMutations(sim.mutationsOfType(m2),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m3),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m4),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m5),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m6),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m7),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m8),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.outputMutations(sim.mutationsOfType(m9),filePath=work_dir+"/"+out_dir+"/mutation_final_dmi_" + seed + ".txt",append=T);
+	sim.simulationFinished();
+}
+
+
+
+//mutation types for DMIs
+
+s7 75001: fitness(NULL) {
+	
+	// ***************************************************************
+	// BDM pairwise negative epistasis
+	// ***************************************************************
+	
+	if(bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n > 0){
+		
+		// initialize fitness pairwise fitness penalities at 0
+		negative_epistasis = rep(1.0, bdm_34v2_n + bdm_2v3_n + bdm_2v4_n + bdm_3v4_n);
+		
+		// calculate fitness for bdmis between the inner branch and p2:
+		if(bdm_34v2_n > 0){
+			
+			// where are the p1 and p2 bdm *alleles* in each genome?
+			m1_locations = c(genome1.positionsOfMutationsOfType(m1), genome2.positionsOfMutationsOfType(m1));
+			m2_locations = c(genome1.positionsOfMutationsOfType(m2), genome2.positionsOfMutationsOfType(m2));
+			
+			// scan each pair of negatively interacting bdm loci (assigned in the starting parameters)
+			
+			for (i in 0:(bdm_34v2_n-1)){
+				
+				// identify the two negatively interacting loci
+				a_locus = bdm_m1_loci[i];
+				b_locus = bdm_m2_loci[i];
+				
+				
+				// count the number of BDM alleles in each genome (if any)
+				num_a_alleles = sum(m1_locations == a_locus);
+				num_b_alleles = sum(m2_locations == b_locus);
+				
+				negative_epistasis[i] = BDMI_fitness(num_a_alleles, num_b_alleles, s_anc, s_bdm, ha, hb);
+			}
+		}
+		
+		if (bdm_2v3_n > 0){
+			
+			m3_locations = c(genome1.positionsOfMutationsOfType(m3), genome2.positionsOfMutationsOfType(m3));
+			m4_locations = c(genome1.positionsOfMutationsOfType(m4), genome2.positionsOfMutationsOfType(m4));
+			
+			// scan each pair of negatively interacting bdm loci (assigned in the starting parameters)
+			
+			for (i in 0(bdm_2v3_n - 1)){
+				
+				// identify the two negatively interacting loci
+				a_locus = bdm_m3_loci[i];
+				b_locus = bdm_m4_loci[i];
+				
+				
+				// count the number of BDM alleles in each genome (if any)
+				num_a_alleles = sum(m3_locations == a_locus);
+				num_b_alleles = sum(m4_locations == b_locus);
+				
+				negative_epistasis[i] = BDMI_fitness(num_a_alleles, num_b_alleles, s_anc, s_bdm, ha, hb);
+			
+			}
+		}
+		
+		if (bdm_2v4_n > 0){
+			
+			m5_locations = c(genome1.positionsOfMutationsOfType(m5), genome2.positionsOfMutationsOfType(m5));
+			m6_locations = c(genome1.positionsOfMutationsOfType(m6), genome2.positionsOfMutationsOfType(m6));
+			
+			// scan each pair of negatively interacting bdm loci (assigned in the starting parameters)
+			
+			for (i in 0:(bdm_2v4_n-1)){
+				
+				// identify the two negatively interacting loci
+				a_locus = bdm_m5_loci[i];
+				b_locus = bdm_m6_loci[i];
+				
+				
+				// count the number of BDM alleles in each genome (if any)
+				num_a_alleles = sum(m5_locations == a_locus);
+				num_b_alleles = sum(m6_locations == b_locus);
+				
+				negative_epistasis[i] = BDMI_fitness(num_a_alleles, num_b_alleles, s_anc, s_bdm, ha, hb);			
+			}
+		}
+		
+		if (bdm_3v4_n > 0){
+			
+			m7_locations = c(genome1.positionsOfMutationsOfType(m7), genome2.positionsOfMutationsOfType(m7));
+			m8_locations = c(genome1.positionsOfMutationsOfType(m8), genome2.positionsOfMutationsOfType(m8));
+			
+			// scan each pair of negatively interacting bdm loci (assigned in the starting parameters)
+			
+			for (i in 0:(bdm_3v4_n - 1)){
+				
+				// identify the two negatively interacting loci
+				a_locus = bdm_m7_loci[i];
+				b_locus = bdm_m8_loci[i];
+				
+				
+				// count the number of BDM alleles in each genome (if any)
+				num_a_alleles = sum(m7_locations == a_locus);
+				num_b_alleles = sum(m8_locations == b_locus);
+				
+				negative_epistasis[i] = BDMI_fitness(num_a_alleles, num_b_alleles, s_anc, s_bdm, ha, hb);
+			
+			}
+		}
+		
+		return (relFitness * product(negative_epistasis));
+	}
+	
+	return (relFitness);
+}

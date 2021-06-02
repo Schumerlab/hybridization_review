@@ -1,0 +1,15 @@
+#!/bin/sh
+
+#SBATCH --ntasks=1 
+#SBATCH --mem=32000
+#SBATCH --cpus-per-task=1
+#SBATCH -p hns,normal
+#SBATCH --time=48:00:00
+#SBATCH --job-name=slim
+#SBATCH --mail-user=schumer@stanford.edu
+
+module load gsl
+module load python/3.6.1
+module load R
+
+perl F4_introgression_simulations_v7.pl F4_introgressed_BMDI_config_v4.slim slim_out_DMI 4 8 0.25 3 0.0 0.0 150 -0.001 10000
